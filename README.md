@@ -83,8 +83,11 @@ Options:
 FORMAT of Input file
 
 Matrix with N rows (samples) and M columns (variables).
+
 The first line must contain variable names: ### name1 name2 name3...
+
 The second line selects variables used for PCA (1=selected, 0=omitted): ### 1 0 1 ...
+
 In this way, the file can contain additional information such as, for chromatin states, chromosome and genomic coordinate of each position.
 
 The github repository contains the example file Properties_genome_w90_norm.dat
