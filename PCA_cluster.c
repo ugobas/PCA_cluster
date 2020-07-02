@@ -50,13 +50,13 @@ static int Remove_file_extension(char *nameout, char *ext, char *filename);
 int Print_PCA(float *, float **, float **, double **,
 	      char **, char **, int, int, char *, double *, double *,
 	      int *N_SHOW, int Print);
-int Print_results(int *cluster, float *Pstate, int ncl, int *numclus,
+int Print_results(int **clust_store, float **P_store, int *numclus,
 		  float **ave, float **err, float *lcorr,
 		  float **data, float **x_VarSam, char **names,
 		  int Nsam, int Nvar, int NPCA, float **Clust_sim,
 		  float Sim_thr, float **Clust_sim_bin, float SIGMA,
 		  FILE *filelog, char *txt, char *nameout, int Print,
-		  char *file_split, int FINAL);
+		  char *file_split, int ncl, int ncl_min, int ncl_max);
 static int Print_parameters(int *numcl,
 			    float *tau, float **corr,
 			    float **mu, float ***sig,
@@ -66,11 +66,12 @@ static int Print_propensity(float *tau, float **corr, int ncl, FILE *filelog);
 char **Set_names(char **var_names, int Nvar, int NPCA);
 void Print_selected_data(float **data, int Nvar, int Nsam,
 			 char **var_names, char *file_name);
-void Print_clusters(int *cluster, float *Pstate, int Nsam, char *file_name);
+void Print_clusters(int **clust_store, float **P_store, int Nsam,
+		    char *file_name, int ncl_min, int ncl_max, int ncl);
 int Print_profile(int *numclus, float **ave, float **dev, char **var_names,
-		  int nclust, int Nsam, int Nvar, char *nameout);
+		  int nclust, int Nsam, int Nvar, char *nameout, char *open);
 int Print_sim(float **Clust_sim, int nclust, int Nvar, char *nameout,
-	      char *, char *what);
+	      char *open, char *what);
 int Split_file(char *file_split, int nclust, int *cluster, int Nsam);
 
 /********************** PCA *************************/
@@ -200,13 +201,11 @@ int main(int argc, char **argv)
   float **Clust_sim_bin=Allocate_mat2_f(nclust_max, nclust_max);
 
   // Clustering
-  int *cluster=malloc(Nsam*sizeof(int));
-  int *clusnew=malloc(Nsam*sizeof(int));
-  for(i=0; i<Nsam; i++){cluster[i]=0; clusnew[i]=0;}
+  int cluster[Nsam]; for(i=0; i<Nsam; i++)cluster[i]=0;
   int ncl=1, ncl_opt=1, clust, k;
   float lik, aic, bic, cscore, AIC_MIN, BIC_MIN, C_MIN, CHI_MAX;
   float lik1, aic1, bic1, g1;
-  int *numclus=malloc((nclust_max+1)*sizeof(int));
+  int numclus[nclust_max+1];
   float **ave=Allocate_mat2_f((nclust_max+1), Nvar+NPCA);
   float **err=Allocate_mat2_f((nclust_max+1), Nvar+NPCA);
 
@@ -215,19 +214,32 @@ int main(int argc, char **argv)
   float **mu=Allocate_mat2_f(nclust_max, NPCA);
   float ***sig=malloc(nclust_max*sizeof(float **));
   for(k=0; k<nclust_max; k++)sig[k]=Allocate_mat2_f(NPCA, NPCA);
-  float *Pstate=malloc(Nsam*sizeof(float));
-  int *join=malloc(nclust_max*sizeof(int));
+  float Pstate[Nsam];
+  int join[nclust_max];
+
+  // Storing_results
+  int nclust_store=nclust_max+1;
+  int *clust_store[nclust_store];
+  float *Pstate_store[nclust_store];
+  for(i=1; i<nclust_store; i++){
+    clust_store[i]=malloc(Nsam*sizeof(int));
+    Pstate_store[i]=malloc(Nsam*sizeof(float));
+  }
 
   float norm_lik1=Nsam_eff/Nsam, norm_lik2=Nsam_eff*NPCA;
   for(ncl=nclust_min; ncl<=nclust_max; ncl++){
-    int split=1, first;
-    if(ncl==nclust_min){first=1;}else{first=0;}
+    int split=1, first; char open[4];
+    if(ncl==nclust_min){
+      strcpy(open,"w"); first=1;
+    }else{
+      strcpy(open,"a"); first=0;
+    }
     if(ORDER){
-      lik=Expectation_maximization_order(clusnew, Pstate,
+      lik=Expectation_maximization_order(cluster, Pstate,
 					 ncl, tau, corr, mu, sig,
 					 x_VarSam, Nsam, NPCA, first);
     }else{
-      lik=Expectation_maximization(clusnew, Pstate,
+      lik=Expectation_maximization(cluster, Pstate,
 				   ncl, tau, mu, sig,
 				   x_VarSam, Nsam, NPCA, first);
     }
@@ -239,7 +251,7 @@ int main(int argc, char **argv)
     aic=AIC(lik, N_para, Nsam_eff);
     bic=BIC(lik, N_para, Nsam_eff);
     lik/=norm_lik2; aic/=norm_lik2; bic/=norm_lik2;
-    float cscore=Cluster_score(clusnew, ncl, x_VarSam, Nsam, NPCA);
+    float cscore=Cluster_score(cluster, ncl, x_VarSam, Nsam, NPCA);
     if(ncl==nclust_min){lik1=lik; aic1=aic; bic1=bic; g1=cscore;}
     sprintf(txt,
 	    "%d clusters: lik= %.4f AIC=%.4f BIC= %.4f (/NPC) score=%.3f\n",
@@ -248,10 +260,10 @@ int main(int argc, char **argv)
     int N_clus=ncl;
 
     // Separation score
-    Cluster_statistics(numclus,ave,err,ncl,clusnew,dat,Nsam,0,Nvar,lcorr);
+    Cluster_statistics(numclus,ave,err,ncl,cluster,dat,Nsam,0,Nvar,lcorr);
     double chi, chisum=0, simsum=0, sum=0, q, sim_max=-1;
     //if(ncl==1)goto print_bic;
-    float *w=malloc(ncl*sizeof(float)), ww;
+    float w[ncl], ww;
     float Chi_Thr=CHI_THR/sqrt(((float)Nsam/(float)ncl));
     for(i=0; i<ncl; i++)join[i]=-1;
     for(i=0; i<ncl; i++){
@@ -303,7 +315,7 @@ int main(int argc, char **argv)
        ((cstop=='b')&&(s_bic))||
        ((cstop=='c')&&(s_score))||
        ((cstop=='s')&&(s_sep))){
-      for(i=0; i<Nsam; i++)cluster[i]=clusnew[i]; ncl_opt=ncl;
+      ncl_opt=ncl;
     }else { // Stop splitting clusters
       //printf("Stopping clustering, optimal number= %d\n", ncl_opt);
       split=0;
@@ -327,25 +339,28 @@ int main(int argc, char **argv)
       printf("%s", txt); fprintf(filelog, "%s", txt);
       break;
     }
-    // Here is where clusters are updated:
-    for(i=0; i<Nsam; i++)cluster[i]=clusnew[i]; */
+    */
     if(ORDER){
       Print_parameters(numclus, tau, corr, mu, sig, ncl, NPCA, filelog);
       Print_propensity(tau, corr, ncl, filelog);
     }
-    Print_results(clusnew, Pstate, ncl, numclus, ave, err, lcorr, dat,
-		  x_VarSam, names, Nsam, Nvar, NPCA, Clust_sim, Sim_thr,
+    int *cl=clust_store[ncl]; float *P=Pstate_store[ncl];
+    for(i=0; i<Nsam; i++){cl[i]=cluster[i]; P[i]=Pstate[i];}
+    Print_results(clust_store, Pstate_store, numclus, ave, err, lcorr,
+		  dat, x_VarSam, names, Nsam, Nvar, NPCA, Clust_sim, Sim_thr,
 		  Clust_sim_bin, SIGMA, filelog, txt, nameout, Print,
-		  file_split, 0);
+		  file_split, ncl, nclust_min, ncl);
 
   }
   fclose(filebic);
 
   printf("Optimal number of clusters: %d\n", ncl_opt);
-  Print_results(cluster, Pstate, ncl_opt, numclus, ave, err, lcorr, dat,
-		x_VarSam, names, Nsam, Nvar, NPCA, Clust_sim, Sim_thr,
-		Clust_sim_bin, SIGMA, filelog, txt, nameout, Print,
-		file_split, 1);
+  if(ncl_opt!=nclust_max){
+    Print_results(clust_store, Pstate_store, numclus, ave, err, lcorr,
+		  dat, x_VarSam, names, Nsam, Nvar, NPCA, Clust_sim, Sim_thr,
+		  Clust_sim_bin, SIGMA, filelog, txt, nameout, Print,
+		  file_split, ncl_opt, nclust_min, nclust_max);
+  }
 
   printf("Parameters used: %d variables, %d principal components, %d samples\n",
 	 Nvar, NPCA, Nsam);
@@ -356,72 +371,86 @@ int main(int argc, char **argv)
 
   Empty_Gaussian_parameters(tau,mu,sig, NPCA, nclust_max);
   Empty_matrix_f(corr, nclust_max);
-  free(numclus);
-  free(Pstate);
   return(0);
 }
 
-int Print_results(int *cluster, float *Pstate, int ncl, int *numclus,
+int Print_results(int **clust_store, float **P_store, int *numclus,
 		  float **ave, float **err, float *lcorr,
 		  float **data, float **x_VarSam, char **names,
 		  int Nsam, int Nvar, int NPCA, float **Clust_sim,
 		  float Sim_thr, float **Clust_sim_bin, float SIGMA,
 		  FILE *filelog, char *txt, char *nameout, int Print,
-		  char *file_split, int FINAL)
+		  char *file_split, int ncl_act, int ncl_min, int ncl_max)
 {
-  int i, j;
+  if(ncl_act==1)return(0);
+  int ncl=ncl_act, i, j, *cluster=clust_store[ncl];
+  printf("Printing results for %d clusters\n", ncl);
 
-  if(FINAL){
-    // Average linkage
-    int *clus_clus=malloc(ncl*sizeof(int)), nnew;
-    Cluster_statistics(numclus, ave, err, ncl, cluster,
-		       data, Nsam, 0, Nvar, lcorr);
-    Cluster_statistics(numclus, ave, err, ncl, cluster,
-		       x_VarSam, Nsam, Nvar, NPCA, lcorr);
-    float Max_sim=
-      Average_linkage_coord(Clust_sim, clus_clus, &nnew,
-			  ncl, ave, numclus, Nvar, Sim_thr);
-    if(nnew != ncl){
-      sprintf(txt,"Average linkage, joining %d clusters into %d\n\n",ncl,nnew);
-      printf("%s", txt); fprintf(filelog, "%s", txt);
-      ncl=nnew;
-      for(i=0; i<Nsam; i++)cluster[i]=clus_clus[cluster[i]];
-    }
-    // Rename clusters according to the first PC
-    Cluster_statistics(numclus,ave,err,ncl,cluster,x_VarSam,Nsam,Nvar,1,lcorr);
-    float *score=malloc(ncl*sizeof(float));
-    for(i=0; i<ncl; i++)score[i]=ave[i][Nvar];
-    Sort(clus_clus, score, ncl);
-    for(i=0; i<Nsam; i++)cluster[i]=clus_clus[cluster[i]];
-  }
-  
+  //if(ncl != ncl_max){ // Optimal number of clusters, join similar clusters
+  // Join similar clusters
 
+  // Compute average observables per cluster (original and PCs)
   Cluster_statistics(numclus, ave, err, ncl, cluster,
 		     data, Nsam, 0, Nvar, lcorr);
   Cluster_statistics(numclus, ave, err, ncl, cluster,
 		     x_VarSam, Nsam, Nvar, NPCA, lcorr);
-  for(i=0; i<ncl; i++){
-    Clust_sim[i][i]=1;
-    for(j=0; j<i; j++){
-      Clust_sim[i][j]=Cosine(ave[i], ave[j], Nvar);
-      Clust_sim[j][i]=Clust_sim[i][j];
+
+  // Join similar clusters through average linkage
+  int clus_clus[ncl], nnew=ncl;
+  float Max_sim=
+    Average_linkage_coord(Clust_sim, clus_clus, &nnew,
+			  ncl, ave, numclus, Nvar, Sim_thr);
+  if(nnew != ncl){
+    sprintf(txt,"Average linkage, joining %d clusters into %d\n\n",ncl,nnew);
+    printf("%s", txt); fprintf(filelog, "%s", txt);
+    ncl=nnew; for(i=0; i<Nsam; i++)cluster[i]=clus_clus[cluster[i]];
+    Cluster_statistics(numclus, ave, err, ncl, cluster,
+		       data, Nsam, 0, Nvar, lcorr);
+    Cluster_statistics(numclus, ave, err, ncl, cluster,
+		       x_VarSam, Nsam, Nvar, NPCA, lcorr);
+  }
+
+  // Rename clusters according to the first PC
+  int O_all=Nvar+NPCA, k;
+  float score[ncl]; for(k=0; k<ncl; k++)score[k]=ave[k][Nvar];
+  Sort(clus_clus, score, ncl);
+  for(i=0; i<Nsam; i++)cluster[i]=clus_clus[cluster[i]];
+  for(i=0; i<O_all; i++){
+    float ave_tmp[ncl], err_tmp[ncl];
+    for(k=0; k<ncl; k++){
+      ave_tmp[clus_clus[k]]=ave[k][i];
+      err_tmp[clus_clus[k]]=err[k][i];
+    }
+    for(k=0; k<ncl; k++){
+      ave[k][i]=ave_tmp[clus_clus[k]];
+      err[k][i]=err_tmp[clus_clus[k]];
     }
   }
+
+  //}
 
   // Silouhette
   // Silouhette(cluster, numclus, ncl, data, Nsam, Nvar);
 
+  // Compute similarity matrices
   for(i=0; i<ncl; i++){
-    Clust_sim_bin[i][i]=1.000;
+    Clust_sim[i][i]=1.0;
+    Clust_sim_bin[i][i]=1.0;
     for(j=0; j<i; j++){
+      Clust_sim[i][j]=Cosine(ave[i], ave[j], Nvar);
       Clust_sim_bin[i][j]=Similarity(ave[i],ave[j],err[i],err[j],Nvar,SIGMA);
       Clust_sim_bin[j][i]=Clust_sim_bin[i][j];
+      Clust_sim[j][i]=Clust_sim[i][j];
     }
   }
 
-  Print_clusters(cluster, Pstate, Nsam, nameout);
-  Print_profile(numclus, ave, err, names, ncl, Nsam, Nvar+NPCA, nameout);
-  Print_sim(Clust_sim, ncl, Nvar, nameout, "w","Cosine(ave_i,ave_j)");
+  // Printing
+  Print_clusters(clust_store, P_store, Nsam, nameout, ncl, ncl_min, ncl_max);
+  
+  char open[4];
+  if(ncl==2 || ncl==ncl_min){strcpy(open,"w");}else{strcpy(open,"a");}
+  Print_profile(numclus, ave, err, names, ncl, Nsam, Nvar+NPCA, nameout,open);
+  Print_sim(Clust_sim, ncl, Nvar, nameout, open,"Cosine(ave_i,ave_j)");
   // Continuous
   Print_sim(Clust_sim_bin, ncl, Nvar, nameout, "a", "BinaryCos(ave_i,ave_j)");
   // Binary
@@ -432,6 +461,7 @@ int Print_results(int *cluster, float *Pstate, int ncl, int *numclus,
     Print_cluster_PC(x_VarSam, cluster, ncl, Nsam, NPCA, namesplit);
   }
   if(file_split)Split_file(file_split, ncl, cluster, Nsam);
+  printf("\n");
   return(0);
 }
 
@@ -928,31 +958,25 @@ float BIC(float lik, int Npara, int Nsam){
   return(BIC);
 }
 
-void Print_clusters(int *cluster, float *Pstate, int Nsam, char *file_name)
+void Print_clusters(int **clust_store, float **P_store, int Nsam,
+		    char *file_name, int ncl, int ncl_min, int ncl_max)
 {
-  char nameout[400]; int i, k;
+  if(ncl==1)return;
+  char nameout[400]; int i;
   sprintf(nameout, "%s_clusters.txt", file_name);
   FILE *file_out=fopen(nameout, "w");
-  printf("Writing clusters in %s (1st col= state, 2nd col= P)\n", nameout); 
-  int *numcl=malloc(Nsam*sizeof(int));
-  for(i=0; i<Nsam; i++)numcl[i]=0;
+  printf("Writing clusters in %s (1st col= index, 2nd col= P)\n", nameout);
+  int n1=ncl_min, n; if(n1==1)n1=2;
+  int n2=ncl_max; if(ncl==ncl_max)n2--;
+  printf("Columns= %d %d-%d\n", ncl, n2, n1);
   for(i=0; i<Nsam; i++){
-    k=cluster[i];
-    if((k<0)||(k>=Nsam)){
-      printf("ERROR, wrong cluster index %d (allowed 1 - %d)\n",
-	     k, Nsam); exit(8);
+    fprintf(file_out, "%d\t%.3f",clust_store[ncl][i], P_store[ncl][i]);
+    for(n=n2; n>=n1; n--){
+      fprintf(file_out, "\t%d\t%.3f",clust_store[n][i], P_store[n][i]);
     }
-    fprintf(file_out, "%d  %.4f\n", k, Pstate[i]);
-    numcl[k]++;
+    fprintf(file_out, "\n");
   }
   fclose(file_out);
-  int n=0;
-  for(k=0; k<Nsam; k++){
-    if(numcl[k]){
-      printf("Cluster %d, %4d elements\n", n+1, numcl[k]); n++;
-    }
-  }
-  free(numcl);
 }
 
 Remove_file_extension(char *nameout, char *ext, char *filename){
@@ -1008,13 +1032,14 @@ void Cluster_statistics(int *numclus, float **ave, float **dev, int ncl,
 
 
 int Print_profile(int *numclus, float **ave, float **dev, char **var_names,
-		  int nclust, int Nsam, int Nvar, char *nameout)
+		  int nclust, int Nsam, int Nvar, char *nameout, char *open)
 {
   int i, j, k;
   char filename[400];
   sprintf(filename, "%s_cluster_profiles.dat", nameout);
   printf("Writing %s\n", filename);
-  FILE *file_out=fopen(filename, "w");
+  FILE *file_out=fopen(filename, open);
+  fprintf(file_out, "# %d clusters\n", nclust);
   fprintf(file_out, "#");
   for(k=1; k<=nclust; k++)fprintf(file_out, "  Clust%d se ", k);
   fprintf(file_out, " Var\n");
@@ -1044,7 +1069,9 @@ Print_sim(float **Clust_sim, int nclust, int Nvar, char *nameout,
   sprintf(filename, "%s_cluster_similarity.dat", nameout);
   printf("Writing %s\n", filename);
   FILE *file_out=fopen(filename, open);
-  fprintf(file_out, "# %d variables\n", Nvar);
+  if(strcmp(open,"w")==0)
+    fprintf(file_out,"# %d variables\n", Nvar);
+  fprintf(file_out, "###     %d clusters\n", nclust);
   fprintf(file_out, "###     %s\n", what);
   fprintf(file_out, "###     ");
   for(k=1; k<=nclust; k++)fprintf(file_out, " Clust%d", k);
