@@ -33,15 +33,16 @@ log file with summary information
 For each value of s, it reports the final scores: Likelihood (the larger the better), BIC, AIC (the smaller the better) with respect to s=1, cluster score (the smaller the better), mean square difference between the average PCs of all pairs of clusters (the larger the better) and maximum cosine between any two different clusters (the smaller the better).
 
 <file>_n<n>_HMM_clusters.txt
-The most important file: for each position in the sequence it reports the most likely state (=cluster) and the posterior probability computed with the HMM.
+The most important file: for each position in the sequence it reports the most likely state (=cluster) index, ranked according to the average value of the first principal component so that cluster 0 has the largest average value of PC0, and the and the posterior probability to belong to the state computed with the HMM.
+Each pair of columns represents a value of the number of clusters. They are printed in decreasing order from nclust_max to nclust_min. If the optimal number of clusters is different from the maximum one, the first pair of columns always represents the optimal number of clusters.
 
 <file>_n<n>_HMM_cluster_profiles.dat
-For each state (=cluster), it reports the average value and the standard error of the O observables and the n PCs and also the number and percentage of elements of each cluster.
+For each studied number of clusters (=states) and each cluster, it reports the average value and the standard error of the O observables and the n PCs and also the number and percentage of elements of each cluster.
 
 <file>_n<n>_HMM_cluster_similarity.dat
-For each pair of states (=clusters) it reports the similarity between the profiles mentioned above, measured as cosine between the n dimensional vectors of the average PCs and cosine between the n dimensional vectors of the binarized average PCs. Pairs of clusters with similarity larger than a threshold are merged.
+For each studied number of clusters (=states) and each pair of clusters it reports the similarity between the profiles mentioned above, measured as cosine between the n dimensional vectors of the average PCs and cosine between the n dimensional vectors of the binarized average PCs. Pairs of clusters with similarity larger than a threshold are merged.
 
-The above files are overwritten for each value of s until the optimal one that maximizes the user defined score or until the value smax. Thie is done because the computation is fast and the To avoid overwriting it would be necessary to modify the code, but the computation is fal
+The above files contain results for each value of s from 2 until the maximal one that maximizes the user defined score or until the value smax.
 
 Input parameters:
 
@@ -90,5 +91,5 @@ The second line selects variables used for PCA (1=selected, 0=omitted): ### 1 0 
 
 In this way, the file can contain additional information such as, for chromatin states, chromosome and genomic coordinate of each position.
 
-The github repository contains the example file Properties_genome_w90_norm.dat
-It was obtained dividing the genome in bins of width 180bp, averaging the Z scores of each of the M genomic and epigenomic observables in the bin, and smoothing in 5 neighboring bins (d=-2,-1,0,1,2) with exponentially decaying weights w(d)=exp(-|d|*A).
+The github repository contains the example file Properties_genome_w250_norm.dat.gz
+It was obtained dividing the genome in bins of width 500bp, averaging the Z scores of each of the M genomic and epigenomic observables in the bin, and smoothing in 5 neighboring bins (d=-2,-1,0,1,2) with exponentially decaying weights w(d)=exp(-|d|*A).
